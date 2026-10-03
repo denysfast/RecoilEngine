@@ -45,6 +45,8 @@ public:
 	void LoadSetupScript(const std::string& script);
 	void LoadDemoFile(const std::string& demo);
 	void LoadSaveFile(const std::string& save);
+	/// multiplayer savegame: open the local copy of the save named by the server's script
+	void LoadMPSaveFile();
 
 	bool Draw() override;
 	bool Update() override;

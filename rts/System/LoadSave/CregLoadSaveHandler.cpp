@@ -6,6 +6,7 @@
 #include "ExternalAI/SkirmishAIHandler.h"
 #include "ExternalAI/EngineOutHandler.h"
 #include "CregLoadSaveHandler.h"
+#include "System/StringUtil.h"
 #include "Map/ReadMap.h"
 #include "Game/Game.h"
 #include "Game/GameSetup.h"
@@ -371,10 +372,94 @@ bool CCregLoadSaveHandler::LoadGameStartInfo(const std::string& path)
 	return (saveVersion == syncVersion);
 }
 
+#ifdef USING_CREG
+namespace {
+	// what the save must not overwrite in a multiplayer load: this client's identity
+	struct LocalPlayerState {
+		int myPlayerNum;
+		int myTeam;
+		int myAllyTeam;
+		int myPlayingTeam;
+		int myPlayingAllyTeam;
+		bool spectating;
+		bool spectatingFullView;
+		bool spectatingFullSelect;
+
+		void Read() {
+			myPlayerNum = gu->myPlayerNum;
+			myTeam = gu->myTeam;
+			myAllyTeam = gu->myAllyTeam;
+			myPlayingTeam = gu->myPlayingTeam;
+			myPlayingAllyTeam = gu->myPlayingAllyTeam;
+			spectating = gu->spectating;
+			spectatingFullView = gu->spectatingFullView;
+			spectatingFullSelect = gu->spectatingFullSelect;
+		}
+		void Write() const {
+			gu->myPlayerNum = myPlayerNum;
+			gu->myTeam = myTeam;
+			gu->myAllyTeam = myAllyTeam;
+			gu->myPlayingTeam = myPlayingTeam;
+			gu->myPlayingAllyTeam = myPlayingAllyTeam;
+			gu->spectating = spectating;
+			gu->spectatingFullView = spectatingFullView;
+			gu->spectatingFullSelect = spectatingFullSelect;
+		}
+	};
+
+	/**
+	 * A multiplayer load keeps the server's script (players, who hosts which AI)
+	 * and takes everything else from the save. The team layout has to be the
+	 * saved one, otherwise players would take over someone else's units.
+	 * Runs identically on every client, so the synced writes stay in sync.
+	 */
+	void ApplyMPSetup()
+	{
+		const auto& setupTeams = gameSetup->GetTeamStartingDataCont();
+		const int gaiaTeams = (teamHandler.GaiaTeamID() >= 0)? 1: 0;
+
+		if (teamHandler.ActiveTeams() - gaiaTeams != static_cast<int>(setupTeams.size()))
+			throw content_error("multiplayer save has " + IntToString(teamHandler.ActiveTeams() - gaiaTeams) + " teams, the game has " + IntToString(setupTeams.size()) + ": rebuild the lobby with the saved team layout");
+
+		for (size_t t = 0; t < setupTeams.size(); ++t) {
+			if (teamHandler.AllyTeam(t) != setupTeams[t].teamAllyteam)
+				throw content_error("multiplayer save: team " + IntToString(t) + " is in allyteam " + IntToString(teamHandler.AllyTeam(t)) + " in the save but in " + IntToString(setupTeams[t].teamAllyteam) + " in the game");
+
+			teamHandler.Team(t)->SetLeader(setupTeams[t].GetLeader());
+		}
+
+		const auto& setupAIs = gameSetup->GetAIStartingDataCont();
+
+		size_t numSavedAIs = 0;
+
+		for (size_t aiId = 0; aiId < MAX_AIS; ++aiId) {
+			SkirmishAIData* savedAI = skirmishAIHandler.GetSkirmishAI(aiId);
+
+			if (savedAI == nullptr)
+				continue;
+
+			numSavedAIs += 1;
+
+			if (aiId >= setupAIs.size() || setupAIs[aiId].team != savedAI->team)
+				throw content_error("multiplayer save: AI #" + IntToString(aiId) + " (\"" + savedAI->name + "\") controls team " + IntToString(savedAI->team) + ", the game has no matching AI there");
+
+			LOG("[LSH::%s] AI #%u (team %d) hosted by player %d (was %d)", __func__, unsigned(aiId), savedAI->team, setupAIs[aiId].hostPlayer, savedAI->hostPlayer);
+			savedAI->hostPlayer = setupAIs[aiId].hostPlayer;
+		}
+
+		if (numSavedAIs != setupAIs.size())
+			throw content_error("multiplayer save has " + IntToString(numSavedAIs) + " AIs, the game has " + IntToString(setupAIs.size()));
+	}
+}
+#endif //USING_CREG
+
 /// this should be called on frame 0 when the game has started
 void CCregLoadSaveHandler::LoadGame()
 {
 #ifdef USING_CREG
+	LocalPlayerState localPlayer;
+	localPlayer.Read();
+
 	ENTER_SYNCED_CODE();
 	{
 		Sim::LoadComponents(iss);
@@ -395,6 +480,16 @@ void CCregLoadSaveHandler::LoadGame()
 		// the only job of gsc is to collect gamestate data
 		CGameStateCollector* gsc = static_cast<CGameStateCollector*>(pGSC);
 		spring::SafeDelete(gsc);
+
+		if (gameSetup->IsMPSave()) {
+			localPlayer.Write();
+			ApplyMPSetup();
+
+			if (gameSetup->mpSaveFrame >= 0 && gs->frameNum != gameSetup->mpSaveFrame)
+				throw content_error("multiplayer save is at frame " + IntToString(gs->frameNum) + ", the game expects frame " + IntToString(gameSetup->mpSaveFrame) + ": players have different saves under this name");
+
+			LOG("[LSH::%s] multiplayer save loaded at frame %d for player %d (team %d)", __func__, gs->frameNum, gu->myPlayerNum, gu->myTeam);
+		}
 	}
 
 	LEAVE_SYNCED_CODE();

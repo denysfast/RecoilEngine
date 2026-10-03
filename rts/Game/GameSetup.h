@@ -64,6 +64,8 @@ public:
 		setupText = std::move(gs.setupText);
 		reloadScript = std::move(gs.reloadScript);
 		demoName = std::move(gs.demoName);
+		mpSaveFile = std::move(gs.mpSaveFile);
+		mpSaveFrame = gs.mpSaveFrame;
 
 		playerRemap = std::move(gs.playerRemap);
 		teamRemap = std::move(gs.teamRemap);
@@ -218,6 +220,15 @@ public:
 	std::string setupText;
 	std::string reloadScript;
 	std::string demoName;
+
+	/**
+	 * Multiplayer savegame: every client loads its own copy of Saves/<mpSaveFile>.ssf
+	 * and the server resumes counting frames at mpSaveFrame (the save's sim frame).
+	 */
+	std::string mpSaveFile;
+	int mpSaveFrame = -1;
+
+	bool IsMPSave() const { return !mpSaveFile.empty(); }
 
 	inline static bool forceOnlyLocal = false;
 private:

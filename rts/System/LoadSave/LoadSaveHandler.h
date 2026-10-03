@@ -42,6 +42,7 @@ public:
 	}
 
 	const std::string& GetScriptText() const { return scriptText; }
+	const std::string& GetMapName() const { return mapName; }
 
 protected:
 	std::string scriptText;

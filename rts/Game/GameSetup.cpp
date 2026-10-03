@@ -60,6 +60,8 @@ CR_REG_METADATA(CGameSetup, (
 	CR_IGNORED(setupText),
 	CR_IGNORED(reloadScript),
 	CR_IGNORED(demoName),
+	CR_IGNORED(mpSaveFile),
+	CR_IGNORED(mpSaveFrame),
 
 	CR_IGNORED(playerRemap),
 	CR_IGNORED(teamRemap),
@@ -212,6 +214,8 @@ void CGameSetup::ResetState()
 	setupText.clear();
 	reloadScript.clear();
 	demoName.clear();
+	mpSaveFile.clear();
+	mpSaveFrame = -1;
 
 	playerRemap.clear(); // never iterated
 	teamRemap.clear(); // never iterated
@@ -622,6 +626,8 @@ bool CGameSetup::Init(const std::string& buf)
 	mapName     = file.SGetValueDef("",  "GAME\\MapName");
 	demoName    = file.SGetValueDef("",  "GAME\\Demofile");
 	hostDemo    = !demoName.empty();
+	mpSaveFile  = file.SGetValueDef("",  "GAME\\MPSaveFile");
+	file.GetTDef(mpSaveFrame, -1, "GAME\\MPSaveFrame");
 
 	file.GetTDef(gameStartDelay, 4u, "GAME\\GameStartDelay");
 

@@ -40,6 +40,7 @@
 #include "System/TdfParser.h"
 #include "System/Input/KeyInput.h"
 #include "System/FileSystem/ArchiveScanner.h"
+#include "System/FileSystem/DataDirsAccess.h"
 #include "System/FileSystem/FileSystem.h"
 #include "System/FileSystem/VFSHandler.h"
 #include "System/LoadSave/DemoRecorder.h"
@@ -145,6 +146,41 @@ void CPreGame::LoadSaveFile(const std::string& save)
 
 	spring::exitCode = spring::EXIT_CODE_BADSAVE;
 	gu->globalQuit = true;
+}
+
+void CPreGame::LoadMPSaveFile()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	assert(saveFileHandler == nullptr);
+
+	// the server's script names the save; every client (players, AI hosts, late
+	// joiners) loads its own copy, the files only have to share the synced state
+	std::string saveName = gameSetup->mpSaveFile;
+
+	if (FileSystem::GetExtensionLowerCase(saveName) != "ssf")
+		saveName += ".ssf";
+
+	const std::string savePath = "Saves/" + saveName;
+
+	if (!FileSystem::FileExists(dataDirsAccess.LocateFile(savePath)))
+		throw content_error("multiplayer save \"" + savePath + "\" not found: this game resumes a saved match, every player needs that save in their Saves folder");
+
+	LOG("[PreGame::%s] loading multiplayer save \"%s\" (frame %d)", __func__, savePath.c_str(), gameSetup->mpSaveFrame);
+
+	saveFileHandler = ILoadSaveHandler::CreateHandler(savePath);
+
+	// gameSetup is already set from the server's script, LoadGameStartInfo
+	// only reads the header and the state; it does not replace the setup
+	if (!saveFileHandler->LoadGameStartInfo(savePath) && !configHandler->GetBool("LoadBadSaves")) {
+		spring::SafeDelete(saveFileHandler);
+		throw content_error("multiplayer save \"" + savePath + "\" was written by a different engine version");
+	}
+
+	if (saveFileHandler->GetMapName() != gameSetup->mapName) {
+		const std::string saveMap = saveFileHandler->GetMapName();
+		spring::SafeDelete(saveFileHandler);
+		throw content_error("multiplayer save \"" + savePath + "\" is on map \"" + saveMap + "\", the game is on \"" + gameSetup->mapName + "\"");
+	}
 }
 
 int CPreGame::KeyPressed(int keyCode, int scanCode, bool isRepeat)
@@ -466,6 +502,9 @@ void CPreGame::UpdateClientNet()
 				LOG("[PreGame::%s] received local player number %i (team %i, allyteam %i), creating LoadScreen", __func__, gu->myPlayerNum, gu->myTeam, gu->myAllyTeam);
 				CLIENT_NETLOG(gu->myPlayerNum, LOG_LEVEL_INFO, mapChecksumMsgBuf);
 				CLIENT_NETLOG(gu->myPlayerNum, LOG_LEVEL_INFO, modChecksumMsgBuf);
+
+				if (saveFileHandler == nullptr && gameSetup->IsMPSave())
+					LoadMPSaveFile();
 
 				CLoadScreen::CreateDeleteInstance(gameSetup->MapFileName(), std::move(modFileName), saveFileHandler);
 

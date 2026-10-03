@@ -2201,7 +2201,8 @@ void CGameServer::CheckForGameStart(bool forced)
 		else if (players[a].myState < GameParticipant::INGAME) {
 			allReady = false;
 			break;
-		} else if (!players[a].spectator && teams[players[a].team].IsActive() && !players[a].IsReadyToStart() && demoReader == nullptr) {
+		} else if (!players[a].spectator && teams[players[a].team].IsActive() && !players[a].IsReadyToStart() && demoReader == nullptr && !myGameSetup->IsMPSave()) {
+			// a resumed multiplayer save has no start positions to pick
 			allReady = false;
 			break;
 		} else {
@@ -2234,6 +2235,9 @@ void CGameServer::StartGame(bool forced)
 	assert(!gameHasStarted);
 	gameHasStarted = true;
 	startTime = gameTime;
+
+	// nobody picks a start position when resuming a multiplayer save
+	forced |= myGameSetup->IsMPSave();
 
 	if (!canReconnect && !allowSpecJoin)
 		packetCache.clear(); // free memory
@@ -2314,6 +2318,17 @@ void CGameServer::StartGame(bool forced)
 
 	frameTimeLeft = 0.0f;
 	lastNewFrameTick = spring_gettime() - spring_msecs(1);
+
+	if (myGameSetup->IsMPSave() && myGameSetup->mpSaveFrame > 0) {
+		// clients resume the saved simulation at this frame; count from there
+		// like PostLoad does for a local save, so keyframes and sync checks line up
+		Message(spring::format("resuming multiplayer save \"%s\" at frame %d", myGameSetup->mpSaveFile.c_str(), myGameSetup->mpSaveFrame));
+		serverFrameNum = myGameSetup->mpSaveFrame;
+
+		for (GameParticipant& p: players) {
+			p.lastFrameResponse = serverFrameNum;
+		}
+	}
 
 	CreateNewFrame(true, false);
 }
